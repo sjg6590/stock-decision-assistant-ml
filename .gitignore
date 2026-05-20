@@ -1,0 +1,60 @@
+# Environment and secrets (never commit)
+.env
+.env.*
+!.env.example
+secrets/
+
+# Local runtime config (copy from *.example.yaml)
+config/watchlist.yaml
+config/thresholds.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Local data and artifacts (keep data/.gitkeep in the repo)
+data/*
+!data/.gitkeep
+data/parquet/
+data/models/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Cursor (local IDE state)
+.cursor/

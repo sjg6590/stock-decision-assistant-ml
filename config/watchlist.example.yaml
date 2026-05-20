@@ -1,0 +1,9 @@
+# Copy to watchlist.yaml and edit for your tickers:
+#   cp config/watchlist.example.yaml config/watchlist.yaml
+#
+# Keep the list small on free Alpha Vantage / NewsAPI tiers to avoid rate limits.
+
+symbols:
+  - AAPL
+  - MSFT
+  - NVDA

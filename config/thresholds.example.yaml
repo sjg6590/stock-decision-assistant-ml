@@ -1,0 +1,204 @@
+# =============================================================================
+# thresholds.example.yaml — reference for config/thresholds.yaml
+# =============================================================================
+#
+# Copy to thresholds.yaml and tune for your watchlist:
+#   cp config/thresholds.example.yaml config/thresholds.yaml
+#
+# Loaded via THRESHOLDS_PATH in .env (default: ./config/thresholds.yaml).
+# Used by training (src/ml/train.py), inference (src/ml/predict.py), and
+# alert fusion (src/signals/fuse.py).
+#
+# Bar counts are daily OHLCV rows AFTER feature engineering (labels + dropna),
+# not raw Schwab history length.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# features — inputs to the feature pipeline
+# -----------------------------------------------------------------------------
+features:
+  # Ticker used for market-relative return features (fetched like any symbol).
+  # Must have enough history in your bar store; SPY is the usual benchmark.
+  market_reference_symbol: "SPY"
+
+
+# -----------------------------------------------------------------------------
+# horizons — prediction targets (forward return windows in trading days)
+# -----------------------------------------------------------------------------
+# Keys are labels stored in model artifacts; values are bar offsets for labels.
+# purge_bars in purged_cv should be >= max(horizons values) to avoid leakage.
+horizons:
+  "1d": 1
+  "3d": 3
+  "5d": 5
+  "2w": 10
+  "3w": 15
+  "1mo": 22
+
+
+# -----------------------------------------------------------------------------
+# train — full-tier training (symbols with enough history)
+# -----------------------------------------------------------------------------
+train:
+  # Minimum feature rows required to train at full tier (~5 years daily ≈ 1200).
+  # Below this, train_cold_start may apply if enabled; otherwise symbol is skipped.
+  min_rows: 1200
+
+  # Validation window (bars). Used to tune per-horizon probability thresholds
+  # and early stopping. ~126 ≈ 6 months of daily bars.
+  val_size: 126
+
+  # Holdout window (bars). Used ONLY for promotion gates — never for threshold
+  # tuning or model selection. ~180 ≈ 9 months.
+  holdout_size: 180
+
+  # XGBoost early-stopping patience on validation RMSE (regression head).
+  early_stopping_rounds: 25
+
+  # Number of retrain attempts per cycle (one per seed / split window).
+  # Must have at least this many entries in train_retry.seeds (if seeds set).
+  max_retrain_attempts: 3
+
+
+# -----------------------------------------------------------------------------
+# train_cold_start — fallback tier for shorter history
+# -----------------------------------------------------------------------------
+train_cold_start:
+  # When true, symbols with bar count in [min_rows, train.min_rows) use this
+  # tier instead of being skipped.
+  enabled: true
+
+  # Minimum feature rows for cold-start tier (e.g. 480 for newer IPOs).
+  min_rows: 480
+
+  # Smaller val/holdout than full tier → noisier metrics; compensated by
+  # stricter promotion gates below.
+  val_size: 60
+  holdout_size: 60
+
+  # Promotion overrides merged on top of promotion: (stricter than full tier).
+  promotion:
+    aggregate_accuracy_min: 0.57
+    sharpe_min: 0.60
+    max_drawdown_max: 0.12
+
+  # Written to model_registry.tag; fuse.py applies confidence_discount to alerts.
+  tag: "cold_start"
+
+  # Subtracted from fused alert confidence when tag is cold_start (0.0–1.0).
+  confidence_discount: 0.1
+
+
+# -----------------------------------------------------------------------------
+# train_retry — how each retrain attempt splits data and picks a winner
+# -----------------------------------------------------------------------------
+train_retry:
+  # Validation strategy across attempts:
+  #   seed_only        — same train/val/holdout split, different RNG seed only
+  #   rolling_holdout  — holdout window shifts back step_bars per attempt
+  #   purged_cv        — walk-forward CV inside train+val (recommended default)
+  strategy: purged_cv
+
+  # Which attempt to keep as the saved artifact:
+  #   last_attempt    — first attempt that passes holdout promotion gates, else last
+  #   best_val_score  — highest validation composite across all attempts
+  selection: best_val_score
+
+  # Explicit RNG seeds per attempt (index 0 = attempt 1). If omitted, uses
+  # 42 + attempt index. Length should be >= train.max_retrain_attempts.
+  seeds: [43, 44, 45]
+
+  # Log an INFO table comparing attempts after the retry loop.
+  log_attempt_comparison: true
+
+  # Weights for validation composite when selection: best_val_score.
+  # Composite = accuracy_weight * val_accuracy + sharpe_weight * val_sharpe.
+  val_score_weights:
+    accuracy: 0.55
+    sharpe: 0.45
+
+  # --- rolling_holdout only (ignored when strategy is seed_only or purged_cv) ---
+  rolling:
+    # Bars to shift the holdout window backward each attempt.
+    step_bars: 30
+    # Skip an attempt if the training slice would be smaller than this.
+    min_train_rows: 600
+
+  # --- purged_cv only (ignored for other strategies) ---
+  purged_cv:
+    # Number of sequential walk-forward folds inside the train+val region.
+    n_splits: 3
+    # Gap between train end and val start (>= max horizon bar count).
+    purge_bars: 22
+    # Extra bars of isolation after each validation fold.
+    embargo_bars: 5
+
+  # Re-ingest market bars every N attempts inside train_with_retries.
+  # 0 = ingest once before the retry loop (current behavior).
+  refresh_bars_every_n_attempts: 0
+
+  # Phase 4: train N random seeds per attempt and aggregate probabilities.
+  # 1 = disabled. Not used when strategy is purged_cv.
+  ensemble_seeds: 1
+
+  # Phase 4: require M of ensemble_seeds to pass basic promotion gates.
+  # 0 = disabled.
+  stability:
+    min_seeds_passing_gates: 0
+    # How to combine seed probabilities: median | mean
+    metric: median
+
+
+# -----------------------------------------------------------------------------
+# promotion — holdout gates; model is "promoted" only if all active gates pass
+# -----------------------------------------------------------------------------
+promotion:
+  # Mean holdout accuracy across horizons must be >= this.
+  aggregate_accuracy_min: 0.54
+
+  # Every horizon's holdout accuracy must be >= this (worst horizon wins).
+  per_horizon_accuracy_min: 0.46
+
+  # Holdout strategy Sharpe (from probability-based backtest) must be >= this.
+  sharpe_min: 0.55
+
+  # Holdout max drawdown must be <= this (fraction, e.g. 0.18 = 18%).
+  max_drawdown_max: 0.18
+
+  # Overfit detector: fail if (val_sharpe - holdout_sharpe) > this.
+  # 0 = disabled. Typical enabled values: 0.75–1.5.
+  max_val_holdout_sharpe_gap: 1.2
+
+  # Phase 4 (rolling_holdout only): require at least N attempts to pass gates.
+  # 0 = disabled.
+  min_passing_windows: 0
+
+  # Metric name when min_passing_windows > 0 (documentation / future use).
+  window_metric: median_sharpe
+
+  # Phase 4: optional horizon-weighted accuracy gate.
+  # Empty {} = disabled. Example:
+  #   horizon_weights: {"1d": 1.0, "5d": 0.8, "1mo": 0.5}
+  # When non-empty, also checks weighted_accuracy_min (per_horizon still applies).
+  horizon_weights: {}
+
+  # Minimum weighted accuracy when horizon_weights is non-empty.
+  weighted_accuracy_min: 0.52
+
+
+# -----------------------------------------------------------------------------
+# signal — live alert fusion (src/signals/fuse.py)
+# -----------------------------------------------------------------------------
+signal:
+  # Fallback probability threshold for horizons missing from the model artifact.
+  # Trained models store per-horizon thresholds in the artifact; this is for
+  # legacy artifacts only.
+  ml_buy_threshold: 0.55
+
+  # Minimum LLM sentiment confidence for a BUY_CANDIDATE alert.
+  # Also requires sentiment label in {bullish, neutral} and action != disagree.
+  sentiment_confidence_min: 0.58
+
+  # Note: ML buy requires >= 2 horizons with proba_up >= per-horizon threshold
+  # (hardcoded in fuse.py, not configurable here).

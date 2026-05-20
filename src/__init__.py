@@ -1,0 +1,1 @@
+"""Stock decision assistant package."""
