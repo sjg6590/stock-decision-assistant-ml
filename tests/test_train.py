@@ -646,8 +646,9 @@ def test_resolve_training_tier_full_when_enough_bars() -> None:
     assert promo_cfg["aggregate_accuracy_min"] == 0.55
 
 
-def test_thresholds_yaml_phase_d_train_sizes() -> None:
-    cfg = load_thresholds(Path("config/thresholds.yaml"))
+def test_thresholds_example_phase_d_train_sizes() -> None:
+    """Phase D defaults live in the committed example config (thresholds.yaml is local-only)."""
+    cfg = load_thresholds(Path("config/thresholds.example.yaml"))
     train = cfg["train"]
     assert train["min_rows"] == 1200
     assert train["val_size"] == 126
