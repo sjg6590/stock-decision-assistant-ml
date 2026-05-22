@@ -188,6 +188,30 @@ def _safe_json(text: str) -> dict[str, Any]:
     }
 
 
+_OLLAMA_NUM_PREDICT = 2048
+_OLLAMA_MAX_ATTEMPTS = 2
+
+
+def _ollama_raw_call(
+    settings: Settings,
+    prompt: str,
+    temperature: float = 0.2,
+) -> str:
+    with httpx.Client(timeout=_httpx_timeout(settings)) as client:
+        resp = client.post(
+            f"{settings.ollama_base_url.rstrip('/')}/api/generate",
+            json={
+                "model": settings.ollama_model,
+                "prompt": f"{SYSTEM_PROMPT}\n\n{prompt}",
+                "stream": False,
+                "format": "json",
+                "options": {"num_predict": _OLLAMA_NUM_PREDICT, "temperature": temperature},
+            },
+        )
+        resp.raise_for_status()
+        return resp.json().get("response", "{}")
+
+
 def analyze_with_llm(settings: Settings, prompt: str) -> dict[str, Any]:
     provider = settings.llm_provider.lower().strip()
     if provider == "openai":
@@ -266,20 +290,17 @@ def analyze_with_llm(settings: Settings, prompt: str) -> dict[str, Any]:
         return _safe_json(text)
     if provider == "ollama":
         try:
-            with httpx.Client(timeout=_httpx_timeout(settings)) as client:
-                resp = client.post(
-                    f"{settings.ollama_base_url.rstrip('/')}/api/generate",
-                    json={
-                        "model": settings.ollama_model,
-                        "prompt": f"{SYSTEM_PROMPT}\n\n{prompt}",
-                        "stream": False,
-                        "format": "json",
-                        "options": {"num_predict": 512},
-                    },
-                )
-                resp.raise_for_status()
-                text = resp.json().get("response", "{}")
-                return _safe_json(text)
+            text = _ollama_raw_call(settings, prompt, temperature=0.2)
+            parsed = _parse_llm_json(text)
+            if parsed is not None:
+                return parsed
+            for attempt in range(2, _OLLAMA_MAX_ATTEMPTS + 1):
+                logger.warning("retrying Ollama for JSON attempt=%d", attempt)
+                text = _ollama_raw_call(settings, prompt, temperature=0.0)
+                parsed = _parse_llm_json(text)
+                if parsed is not None:
+                    return parsed
+            return _safe_json(text)
         except httpx.TimeoutException as exc:
             logger.warning("Ollama request timed out after %ss: %s", settings.llm_timeout_seconds, exc)
             return _neutral_payload(f"Ollama timed out after {settings.llm_timeout_seconds}s")
