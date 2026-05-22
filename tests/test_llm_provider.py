@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -10,6 +12,21 @@ from data.news_anthropic_web import rate_limit_retry_seconds, reset_anthropic_ra
 from sentiment.analyze import _article_limit, _blurb_char_limit
 from sentiment.llm_provider import analyze_with_llm
 from settings import Settings
+
+
+_GOOD_JSON = json.dumps({
+    "sentiment_label": "bullish",
+    "confidence": 0.7,
+    "recommended_action": "agree",
+    "bullish_factors": ["Strong earnings"],
+    "bearish_factors": ["Rising costs"],
+    "macro_risks": ["Fed uncertainty"],
+    "summary": "Positive outlook.",
+})
+
+
+def _ollama_settings() -> Settings:
+    return Settings(LLM_PROVIDER="ollama")
 
 
 def test_rate_limit_retry_seconds_uses_retry_after_header() -> None:
@@ -87,3 +104,52 @@ def test_analyze_with_llm_drops_web_search_tools_on_rate_limit(
 
     assert client.messages.create.call_count == 2
     assert "tools" not in client.messages.create.call_args_list[1].kwargs
+
+
+def test_ollama_returns_valid_json_on_first_attempt() -> None:
+    with patch("sentiment.llm_provider._ollama_raw_call", return_value=_GOOD_JSON) as raw:
+        result = analyze_with_llm(_ollama_settings(), "Ticker: TEST")
+
+    raw.assert_called_once()
+    assert result["sentiment_label"] == "bullish"
+    assert result["confidence"] == pytest.approx(0.7)
+
+
+def test_ollama_retries_on_invalid_json_then_succeeds(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """First call returns unparseable text; second call returns valid JSON — retry logged."""
+    with patch(
+        "sentiment.llm_provider._ollama_raw_call",
+        side_effect=["this is not json at all", _GOOD_JSON],
+    ) as raw:
+        with caplog.at_level(logging.WARNING, logger="sentiment.llm_provider"):
+            result = analyze_with_llm(_ollama_settings(), "Ticker: TEST")
+
+    assert raw.call_count == 2
+    # Second call must use temperature 0 for deterministic retry
+    _, kwargs = raw.call_args_list[1]
+    assert kwargs.get("temperature") == 0.0
+
+    assert result["sentiment_label"] == "bullish"
+    assert any("retrying Ollama for JSON" in r.message and "attempt=2" in r.message
+               for r in caplog.records)
+
+
+def test_ollama_all_retries_fail_logs_warning_and_returns_neutral(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both attempts return unparseable text — WARNING logged, neutral 0.0 returned."""
+    with patch(
+        "sentiment.llm_provider._ollama_raw_call",
+        side_effect=["not json", "still not json"],
+    ) as raw:
+        with caplog.at_level(logging.WARNING, logger="sentiment.llm_provider"):
+            result = analyze_with_llm(_ollama_settings(), "Ticker: TEST")
+
+    assert raw.call_count == 2
+    assert result["sentiment_label"] == "neutral"
+    assert result["confidence"] == 0.0
+    assert any(
+        "LLM response was not valid JSON" in r.message for r in caplog.records
+    )
