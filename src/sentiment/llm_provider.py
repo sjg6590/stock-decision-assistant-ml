@@ -45,11 +45,14 @@ Output ONLY a single JSON object — no prose, no markdown, no code fences — w
 Field rules:
 - sentiment_label: MUST be exactly one of "bullish", "neutral", or "bearish". No other values.
 - confidence: calibrated probability that the sentiment_label is correct.
-  0.0 = no usable signal (e.g. no relevant articles).
-  0.3–0.5 = weak or mixed evidence.
-  0.6–0.75 = moderate conviction with supporting evidence.
-  0.8+ = strong, consistent signal across multiple credible sources.
-  Default most outputs to 0.3–0.65; reserve 0.75+ for exceptional clarity.
+  0.0–0.2 = no usable or relevant articles found.
+  0.3–0.49 = sparse or ambiguous evidence; factors are weak or contradictory.
+  0.5–0.64 = balanced/inconclusive news — use this for neutral stocks where evidence
+    is present but does not point strongly in either direction.
+  0.65–0.79 = moderate conviction; evidence leans clearly in one direction across
+    multiple recent sources.
+  0.8–1.0 = strong consistent signal across multiple credible, recent sources.
+  Calibrate to the actual evidence strength; do not artificially compress scores.
 - recommended_action: MUST be exactly one of:
   "agree"     — news sentiment supports the ML bullish signal.
   "neutral"   — sentiment is ambiguous or unrelated to price direction.
