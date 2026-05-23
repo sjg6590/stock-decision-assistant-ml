@@ -7,8 +7,15 @@ from ta.trend import MACD
 from ta.volatility import BollingerBands
 from ta.volatility import AverageTrueRange
 
+VOL_Z_CLIP = 5.0
+GAP_CLIP = 0.15  # 15% — larger than typical overnight gaps, catches halts
 
-def build_features(frame: pd.DataFrame, spy_frame: pd.DataFrame | None = None) -> pd.DataFrame:
+
+def build_features(
+    frame: pd.DataFrame,
+    spy_frame: pd.DataFrame | None = None,
+    feature_clip: dict | None = None,
+) -> pd.DataFrame:
     df = frame.sort_values("datetime").copy()
     df["ret_1"] = np.log(df["close"] / df["close"].shift(1))
     df["ret_5"] = np.log(df["close"] / df["close"].shift(5))
@@ -19,6 +26,10 @@ def build_features(frame: pd.DataFrame, spy_frame: pd.DataFrame | None = None) -
     ).average_true_range() / (df["close"] + 1e-9)
     df["vol_z"] = (df["volume"] - df["volume"].rolling(20).mean()) / (df["volume"].rolling(20).std() + 1e-9)
     df["gap"] = (df["open"] - df["close"].shift(1)) / (df["close"].shift(1) + 1e-9)
+    _vol_z_clip = float((feature_clip or {}).get("vol_z", VOL_Z_CLIP))
+    _gap_clip = float((feature_clip or {}).get("gap", GAP_CLIP))
+    df["vol_z"] = df["vol_z"].clip(-_vol_z_clip, _vol_z_clip)
+    df["gap"] = df["gap"].clip(-_gap_clip, _gap_clip)
     df["rsi_14"] = RSIIndicator(close=df["close"], window=14).rsi()
     macd = MACD(close=df["close"])
     df["macd"] = macd.macd()
