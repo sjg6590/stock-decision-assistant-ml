@@ -60,6 +60,11 @@ train:
   # Must have at least this many entries in train_retry.seeds (if seeds set).
   max_retrain_attempts: 3
 
+  # Minimum forward return required to label a bar as "up" (e.g. 0.002 = 0.2%).
+  # 0.0 = current behavior (any positive return counts as win). A non-zero value
+  # filters out sub-cost moves that would otherwise generate noisy labels.
+  label_min_return_threshold: 0.002
+
 
 # -----------------------------------------------------------------------------
 # train_cold_start — fallback tier for shorter history

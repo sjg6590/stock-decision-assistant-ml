@@ -252,7 +252,11 @@ def train_with_retries(
         min_passing_windows > 0 and strategy == "rolling_holdout"
     )
 
-    base = add_multi_horizon_labels(build_features(bars, spy_frame), horizons).dropna().reset_index(drop=True)
+    min_return_threshold = float(train_cfg.get("label_min_return_threshold", 0.0))
+    logger.debug("label_min_return_threshold symbol=%s threshold=%.4f", symbol, min_return_threshold)
+    base = add_multi_horizon_labels(
+        build_features(bars, spy_frame), horizons, min_return_threshold=min_return_threshold
+    ).dropna().reset_index(drop=True)
     if len(base) < min_rows:
         logger.info(
             "insufficient_history symbol=%s feature_rows=%d min_rows=%d cold_start=%s",
