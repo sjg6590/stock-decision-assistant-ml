@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -216,6 +217,25 @@ def _failed_promotion_gates(
             failed.append("weighted_accuracy")
 
     return failed
+
+
+def prune_excess_promoted_artifacts(
+    store: DataStore,
+    model_dir: Path,
+    symbol: str,
+    max_versions: int,
+) -> int:
+    """Delete artifact files for the oldest promoted versions beyond max_versions. Returns bytes freed."""
+    versions = store.list_promoted_versions(symbol)
+    excess = versions[: max(0, len(versions) - max_versions)]
+    freed = 0
+    for version, _ in excess:
+        artifact = Path(model_dir) / symbol / version / "models.pkl"
+        if artifact.exists():
+            freed += artifact.stat().st_size
+            artifact.unlink()
+            logger.debug("pruned_promoted_artifact symbol=%s version=%s", symbol, version)
+    return freed
 
 
 def train_with_retries(
@@ -639,6 +659,26 @@ def train_with_retries(
                 if r["promoted"]:
                     r["promoted"] = False
                     r["failed_gates"] = list(r.get("failed_gates", [])) + ["min_passing_windows"]
+
+    # Determine the final result before pruning so we never delete what we're returning.
+    if selection == "best_val_score" and all_attempt_results:
+        _pre_final = max(all_attempt_results, key=lambda r: r["val_composite"])
+    elif all_attempt_results:
+        _pre_final = all_attempt_results[-1]
+    else:
+        _pre_final = None
+
+    # Phase A: delete artifact files for non-promoted, non-selected attempts immediately.
+    for r in all_attempt_results:
+        if not r["promoted"] and r is not _pre_final:
+            artifact_path = Path(r["artifact"])
+            if artifact_path.exists():
+                artifact_path.unlink()
+                logger.debug("pruned_artifact symbol=%s version=%s", symbol, r["version"])
+
+    # Phase B: retain only the last N promoted versions on disk.
+    max_promoted_retained = int(train_cfg.get("max_promoted_versions_retained", 5))
+    prune_excess_promoted_artifacts(store, model_dir, symbol, max_promoted_retained)
 
     if retry_cfg.get("log_attempt_comparison", True) and all_attempts:
         _log_attempt_summary(symbol, all_attempts)

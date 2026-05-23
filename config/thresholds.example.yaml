@@ -76,6 +76,10 @@ train:
   # filters out sub-cost moves that would otherwise generate noisy labels.
   label_min_return_threshold: 0.002
 
+  # Maximum number of promoted model artifact files to keep per symbol on disk.
+  # Older promoted artifacts beyond this limit are deleted (registry rows retained).
+  max_promoted_versions_retained: 5
+
 
 # -----------------------------------------------------------------------------
 # train_cold_start — fallback tier for shorter history

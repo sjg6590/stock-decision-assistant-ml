@@ -15,7 +15,7 @@ from data.store import DataStore
 from ml.features import model_features_stale
 from ml.predict import predict_symbol
 from ml.registry import load_models
-from ml.train import train_with_retries
+from ml.train import prune_excess_promoted_artifacts, train_with_retries
 from notify.base import format_alert
 from notify.email import send_email_alert
 from notify.push import send_ntfy_alert, send_telegram_alert
@@ -326,6 +326,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     backtest.add_argument("symbol", type=str)
 
     sub.add_parser("schwab-login", help="Run Schwab OAuth login flow")
+    sub.add_parser("prune-artifacts", help="Delete non-promoted and excess promoted model artifacts")
     return parser.parse_args(argv)
 
 
@@ -374,6 +375,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "schwab-login":
         build_client(settings)
         print("Schwab login flow completed. Token saved.")
+        return 0
+    if args.cmd == "prune-artifacts":
+        thresholds = _load_thresholds(settings)
+        max_versions = int(thresholds.get("train", {}).get("max_promoted_versions_retained", 5))
+        all_symbols = store.list_all_symbols()
+        total_freed = 0
+        for sym in all_symbols:
+            freed = prune_excess_promoted_artifacts(store, settings.model_dir, sym, max_versions)
+            if freed:
+                logger.info("prune_artifacts symbol=%s freed_bytes=%d", sym, freed)
+            total_freed += freed
+        logger.info("prune_artifacts_complete symbols=%d total_freed_bytes=%d", len(all_symbols), total_freed)
+        print(f"Pruned artifacts for {len(all_symbols)} symbols, freed {total_freed / 1024:.1f} KB")
         return 0
     return 1
 

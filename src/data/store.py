@@ -159,6 +159,28 @@ class DataStore:
             return None
         return row[0], json.loads(row[1])
 
+    def list_promoted_versions(self, symbol: str) -> list[tuple[str, str]]:
+        """Return (version, created_at) for all promoted versions, oldest first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT version, created_at
+                FROM model_registry
+                WHERE symbol = ? AND promoted = 1
+                ORDER BY created_at ASC
+                """,
+                (symbol,),
+            ).fetchall()
+        return [(row[0], row[1]) for row in rows]
+
+    def list_all_symbols(self) -> list[str]:
+        """Return all distinct symbols in the model registry."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT symbol FROM model_registry ORDER BY symbol"
+            ).fetchall()
+        return [row[0] for row in rows]
+
     def get_latest_model(self, symbol: str) -> tuple[str, dict[str, Any], bool] | None:
         with self._connect() as conn:
             row = conn.execute(
