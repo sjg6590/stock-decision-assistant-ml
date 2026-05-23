@@ -168,7 +168,7 @@ promotion:
 
   # Overfit detector: fail if (val_sharpe - holdout_sharpe) > this.
   # 0 = disabled. Typical enabled values: 0.75–1.5.
-  max_val_holdout_sharpe_gap: 1.2
+  max_val_holdout_sharpe_gap: 1.5
 
   # Phase 4 (rolling_holdout only): require at least N attempts to pass gates.
   # 0 = disabled.
@@ -198,7 +198,7 @@ signal:
 
   # Minimum LLM sentiment confidence for a BUY_CANDIDATE alert.
   # Also requires sentiment label in {bullish, neutral} and action != disagree.
-  sentiment_confidence_min: 0.58
+  sentiment_confidence_min: 0.52
 
   # Note: ML buy requires >= 2 horizons with proba_up >= per-horizon threshold
   # (hardcoded in fuse.py, not configurable here).
