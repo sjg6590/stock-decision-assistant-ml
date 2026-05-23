@@ -223,3 +223,7 @@ signal:
   # margin_above_threshold: horizon with largest (prob_up - threshold) margin (default)
   # proba_x_return: legacy formula prob_up * max(expected_return, 0.0001)
   best_horizon_selection: margin_above_threshold
+
+  # When true, predict_symbol raises ValueError if a model artifact was trained
+  # on a different feature set than the current code uses. Default false = warn only.
+  fail_on_stale_features: false
