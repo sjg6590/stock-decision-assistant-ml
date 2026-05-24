@@ -10,6 +10,12 @@ from sda_types import HorizonPrediction, ModelPrediction
 logger = logging.getLogger(__name__)
 
 
+def _horizon_confidence_margin(p: HorizonPrediction) -> tuple[float, float]:
+    """Primary: margin above decision boundary. Tiebreaker: expected_return (clamped to 0)."""
+    margin = p.probability_up - (p.threshold if p.threshold > 0 else 0.5)
+    return (margin, max(p.expected_return, 0.0))
+
+
 def predict_symbol(
     model_dir,
     symbol: str,
@@ -19,6 +25,7 @@ def predict_symbol(
     debug: bool = False,
     ml_buy_threshold_fallback: float = 0.60,
     spy_frame=None,
+    signal_config: dict | None = None,
 ) -> ModelPrediction:
     payload = load_models(model_dir, symbol, version)
     feat_df = build_features(bars, spy_frame).dropna().reset_index(drop=True)
@@ -58,7 +65,11 @@ def predict_symbol(
             )
         )
 
-    best = max(preds, key=lambda p: p.probability_up * max(p.expected_return, 0.0001))
+    selection_method = (signal_config or {}).get("best_horizon_selection", "margin_above_threshold")
+    if selection_method == "proba_x_return":
+        best = max(preds, key=lambda p: p.probability_up * max(p.expected_return, 0.0001))
+    else:
+        best = max(preds, key=_horizon_confidence_margin)
     avg_conf = sum(p.probability_up for p in preds) / len(preds)
 
     logger.debug(
