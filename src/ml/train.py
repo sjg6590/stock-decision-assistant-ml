@@ -110,7 +110,19 @@ def _log_attempt_summary(symbol: str, all_attempts: list[dict[str, Any]]) -> Non
 
 
 
-def _build_models(seed: int, early_stopping_rounds: int) -> tuple[XGBClassifier, XGBRegressor]:
+def _compute_scale_pos_weight(y: pd.Series) -> float:
+    n_pos = int(y.sum())
+    n_neg = len(y) - n_pos
+    if n_pos == 0 or n_neg == 0:
+        return 1.0
+    return n_neg / n_pos
+
+
+def _build_models(
+    seed: int,
+    early_stopping_rounds: int,
+    scale_pos_weight: float = 1.0,
+) -> tuple[XGBClassifier, XGBRegressor]:
     clf = XGBClassifier(
         n_estimators=200,
         max_depth=4,
@@ -120,6 +132,7 @@ def _build_models(seed: int, early_stopping_rounds: int) -> tuple[XGBClassifier,
         eval_metric="logloss",
         early_stopping_rounds=early_stopping_rounds,
         random_state=seed,
+        scale_pos_weight=scale_pos_weight,
     )
     reg = XGBRegressor(
         n_estimators=200,
@@ -237,6 +250,7 @@ def train_with_retries(
     min_rows = int(train_cfg["min_rows"])
     selection = retry_cfg["selection"]
     strategy = retry_cfg["strategy"]
+    class_weight_mode = str(train_cfg.get("class_weight", "auto"))
 
     # Phase 4: multi-seed stability gate config
     ensemble_seeds_count = int(retry_cfg.get("ensemble_seeds", 1))
@@ -362,6 +376,17 @@ def train_with_retries(
                 fold_strat: list[tuple[float, float]] = []
                 final_threshold = 0.5
 
+                # Compute scale_pos_weight from combined train+val region for consistency with final fit.
+                _spw_cv = (
+                    _compute_scale_pos_weight(train_val_df[up_col])
+                    if class_weight_mode == "auto"
+                    else 1.0
+                )
+                logger.debug(
+                    "scale_pos_weight symbol=%s attempt=%d hz=%s strategy=purged_cv spw=%.4f",
+                    symbol, attempt, hz, _spw_cv,
+                )
+
                 for k_idx, fold in enumerate(cv_folds):
                     xf_tr = train_val_df.iloc[:fold.train_end][feats]
                     yf_tr = train_val_df.iloc[:fold.train_end][up_col]
@@ -370,7 +395,7 @@ def train_with_retries(
                     yf_val = train_val_df.iloc[fold.val_start:fold.val_end][up_col]
                     yf_val_ret = train_val_df.iloc[fold.val_start:fold.val_end][ret_col]
 
-                    f_clf, f_reg = _build_models(seed=seed, early_stopping_rounds=early_stopping_rounds)
+                    f_clf, f_reg = _build_models(seed=seed, early_stopping_rounds=early_stopping_rounds, scale_pos_weight=_spw_cv)
                     f_clf.fit(xf_tr, yf_tr, eval_set=[(xf_val, yf_val)], verbose=False)
                     f_reg.fit(xf_tr, yf_tr_ret, eval_set=[(xf_val, yf_val_ret)], verbose=False)
 
@@ -411,7 +436,7 @@ def train_with_retries(
                     "purged_cv_final_fit symbol=%s attempt=%d hz=%s train=[0,%d) eval=[%d,%d)",
                     symbol, attempt, hz, last_fold.val_start, last_fold.val_start, last_fold.val_end,
                 )
-                final_clf, final_reg = _build_models(seed=seed, early_stopping_rounds=early_stopping_rounds)
+                final_clf, final_reg = _build_models(seed=seed, early_stopping_rounds=early_stopping_rounds, scale_pos_weight=_spw_cv)
                 final_clf.fit(
                     x_train_final, y_train_final,
                     eval_set=[(x_es, y_es)], verbose=False,
@@ -448,6 +473,12 @@ def train_with_retries(
                 y_val = val_df[up_col]
                 y_val_ret = val_df[ret_col]
 
+                _spw = _compute_scale_pos_weight(y_train) if class_weight_mode == "auto" else 1.0
+                logger.debug(
+                    "scale_pos_weight symbol=%s attempt=%d hz=%s strategy=%s spw=%.4f",
+                    symbol, attempt, hz, strategy, _spw,
+                )
+
                 if use_multi_seed:
                     # Phase 4.1: train ensemble_seeds classifiers; aggregate probabilities.
                     # Per-seed holdout metrics are tracked separately for the stability gate.
@@ -458,7 +489,7 @@ def train_with_retries(
                     primary_reg: XGBRegressor | None = None
 
                     for s_idx in range(ensemble_seeds_count):
-                        s_clf, s_reg = _build_models(seed=seed + s_idx, early_stopping_rounds=early_stopping_rounds)
+                        s_clf, s_reg = _build_models(seed=seed + s_idx, early_stopping_rounds=early_stopping_rounds, scale_pos_weight=_spw)
                         s_clf.fit(x_train, y_train, eval_set=[(x_val, y_val)], verbose=False)
                         if s_idx == 0:
                             s_reg.fit(x_train, y_train_ret, eval_set=[(x_val, y_val_ret)], verbose=False)
@@ -481,7 +512,7 @@ def train_with_retries(
                     proba_holdout = _agg_fn(np.stack(seed_holdout_probas_list, axis=0), axis=0)
                     clf, reg = seed_clfs[0], primary_reg
                 else:
-                    clf, reg = _build_models(seed=seed, early_stopping_rounds=early_stopping_rounds)
+                    clf, reg = _build_models(seed=seed, early_stopping_rounds=early_stopping_rounds, scale_pos_weight=_spw)
                     clf.fit(x_train, y_train, eval_set=[(x_val, y_val)], verbose=False)
                     reg.fit(x_train, y_train_ret, eval_set=[(x_val, y_val_ret)], verbose=False)
                     proba_val = clf.predict_proba(x_val)[:, 1]
