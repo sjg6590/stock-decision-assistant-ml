@@ -182,6 +182,7 @@ def run_symbol_cycle(
         thresholds["horizons"],
         debug=debug,
         spy_frame=spy_bars,
+        signal_config=signal_cfg,
     )
     articles = ingest_news_for_symbol(
         store,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from ml.features import build_features, resolve_model_features
+from ml.features import build_features, feature_columns, model_features_stale, resolve_model_features
 from ml.registry import load_models
 from sda_types import HorizonPrediction, ModelPrediction
 
@@ -28,6 +28,22 @@ def predict_symbol(
     signal_config: dict | None = None,
 ) -> ModelPrediction:
     payload = load_models(model_dir, symbol, version)
+
+    if model_features_stale(payload):
+        stale_feats = set(resolve_model_features(payload))
+        live_feats = set(feature_columns())
+        logger.warning(
+            "stale_model_features symbol=%s version=%s added=%s removed=%s — retraining recommended",
+            symbol, version,
+            sorted(live_feats - stale_feats),
+            sorted(stale_feats - live_feats),
+        )
+        if (signal_config or {}).get("fail_on_stale_features", False):
+            raise ValueError(
+                f"Stale model features for {symbol} version={version}: "
+                f"added={sorted(live_feats - stale_feats)}, removed={sorted(stale_feats - live_feats)}"
+            )
+
     feat_df = build_features(bars, spy_frame).dropna().reset_index(drop=True)
     if feat_df.empty:
         return ModelPrediction(symbol=symbol, generated_at=datetime.now(tz=timezone.utc))
