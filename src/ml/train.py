@@ -224,12 +224,15 @@ def prune_excess_promoted_artifacts(
     model_dir: Path,
     symbol: str,
     max_versions: int,
+    skip_version: str | None = None,
 ) -> int:
     """Delete artifact files for the oldest promoted versions beyond max_versions. Returns bytes freed."""
     versions = store.list_promoted_versions(symbol)
     excess = versions[: max(0, len(versions) - max_versions)]
     freed = 0
     for version, _ in excess:
+        if version == skip_version:
+            continue
         artifact = Path(model_dir) / symbol / version / "models.pkl"
         if artifact.exists():
             freed += artifact.stat().st_size
@@ -678,7 +681,8 @@ def train_with_retries(
 
     # Phase B: retain only the last N promoted versions on disk.
     max_promoted_retained = int(train_cfg.get("max_promoted_versions_retained", 5))
-    prune_excess_promoted_artifacts(store, model_dir, symbol, max_promoted_retained)
+    skip_ver = _pre_final["version"] if _pre_final else None
+    prune_excess_promoted_artifacts(store, model_dir, symbol, max_promoted_retained, skip_ver)
 
     if retry_cfg.get("log_attempt_comparison", True) and all_attempts:
         _log_attempt_summary(symbol, all_attempts)
