@@ -403,13 +403,21 @@ def train_with_retries(
                 y_es = train_val_df.iloc[last_fold.val_start:last_fold.val_end][up_col]
                 y_es_ret = train_val_df.iloc[last_fold.val_start:last_fold.val_end][ret_col]
 
+                # Train on rows before last_fold.val_start so eval set is truly held out.
+                x_train_final = train_val_df.iloc[:last_fold.val_start][feats]
+                y_train_final = train_val_df.iloc[:last_fold.val_start][up_col]
+                y_train_final_ret = train_val_df.iloc[:last_fold.val_start][ret_col]
+                logger.debug(
+                    "purged_cv_final_fit symbol=%s attempt=%d hz=%s train=[0,%d) eval=[%d,%d)",
+                    symbol, attempt, hz, last_fold.val_start, last_fold.val_start, last_fold.val_end,
+                )
                 final_clf, final_reg = _build_models(seed=seed, early_stopping_rounds=early_stopping_rounds)
                 final_clf.fit(
-                    train_val_df[feats], train_val_df[up_col],
+                    x_train_final, y_train_final,
                     eval_set=[(x_es, y_es)], verbose=False,
                 )
                 final_reg.fit(
-                    train_val_df[feats], train_val_df[ret_col],
+                    x_train_final, y_train_final_ret,
                     eval_set=[(x_es, y_es_ret)], verbose=False,
                 )
 
