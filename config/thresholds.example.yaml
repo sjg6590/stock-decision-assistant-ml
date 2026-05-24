@@ -24,6 +24,17 @@ features:
 
 
 # -----------------------------------------------------------------------------
+# feature_clip — symmetric clip limits for unbounded engineered features
+# -----------------------------------------------------------------------------
+# Applied identically at training time and inference time in build_features().
+# Reduces gradient variance from extreme events (earnings, halts, rebalancing).
+feature_clip:
+  vol_z: 5.0    # volume z-score; events like halts can exceed ±20 without clipping
+  gap: 0.15     # overnight gap as fraction of prior close; 15% catches most halts
+  ret_1: 0.20   # single-bar log-return cap; extreme moves are otherwise unbounded
+
+
+# -----------------------------------------------------------------------------
 # horizons — prediction targets (forward return windows in trading days)
 # -----------------------------------------------------------------------------
 # Keys are labels stored in model artifacts; values are bar offsets for labels.
