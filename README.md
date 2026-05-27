@@ -24,7 +24,7 @@ Local Python daemon that combines Schwab market data, ML predictions, news senti
 ## Quick start
 
 ```bash
-git clone https://github.com/YOUR_USER/stock-decision-assistant.git
+git clone https://github.com/sjg6590/stock-decision-assistant.git
 cd stock-decision-assistant
 
 python3 -m venv .venv
